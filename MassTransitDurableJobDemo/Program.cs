@@ -4,6 +4,11 @@ using MassTransit.EntityFrameworkCoreIntegration;
 using MassTransitDurableJobDemo.Consumers;
 using MassTransitDurableJobDemo.Contracts;
 using Microsoft.EntityFrameworkCore;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Driver;
+using MongoDB.Driver.Linq;
 using Scalar.AspNetCore;
 using Serilog;
 using System.Reflection;
@@ -28,18 +33,30 @@ try
     // Serilog integration
     builder.Host.UseSerilog();
 
-    // EF Core / SQLite
-    builder.Services.AddDbContext<JobServiceSagaDbContext>(options =>
+    string persistenceProvider = builder.Configuration["PersistenceProvider"] ?? "sqlite";
+
+    if (persistenceProvider == "mongodb")
     {
-        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"), m =>
+        BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
+    }
+    else
+    {
+        // EF Core / SQLite
+        builder.Services.AddDbContext<JobServiceSagaDbContext>(options =>
         {
-            m.MigrationsAssembly(Assembly.GetExecutingAssembly().GetName().Name);
-            m.MigrationsHistoryTable($"__{nameof(JobServiceSagaDbContext)}");
+            options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"), m =>
+            {
+                m.MigrationsAssembly(Assembly.GetExecutingAssembly().GetName().Name);
+                m.MigrationsHistoryTable($"__{nameof(JobServiceSagaDbContext)}");
+            });
         });
-    });
+    }
+
+
 
     // OpenAPI
     builder.Services.AddOpenApi();
+
 
     // MassTransit
     builder.Services.AddMassTransit(x =>
@@ -57,19 +74,39 @@ try
             });
         });
 
-        // Job Service saga state machines with EF Core + SQLite
-        x.AddJobSagaStateMachines(options =>
+        if (persistenceProvider == "mongodb")
         {
-            options.ConcurrentMessageLimit = 2;
-            options.FinalizeCompleted = false;
-            options.SuspectJobRetryCount = 3;
-            options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
-        })
+            // Job Service saga state machines with MongoDB
+            x.AddJobSagaStateMachines(options =>
+            {
+                options.ConcurrentMessageLimit = 2;
+                options.FinalizeCompleted = false;
+                options.SuspectJobRetryCount = 3;
+                options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
+            })
+            .MongoDbRepository(r =>
+            {
+                r.Connection = builder.Configuration.GetConnectionString("MongoDb");
+                r.DatabaseName = "MassTransitDemo";
+            });
+        }
+        else
+        {
+            // Job Service saga state machines with EF Core + SQLite
+            x.AddJobSagaStateMachines(options =>
+            {
+                options.ConcurrentMessageLimit = 2;
+                options.FinalizeCompleted = false;
+                options.SuspectJobRetryCount = 3;
+                options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
+            })
             .EntityFrameworkRepository(r =>
             {
                 r.ExistingDbContext<JobServiceSagaDbContext>();
                 r.UseSqlite();
             });
+        }
+
 
         x.SetKebabCaseEndpointNameFormatter();
 
@@ -102,9 +139,10 @@ try
     app.MapOpenApi();
     app.MapScalarApiReference();
 
-    // Auto-migrate database on startup
-    using (var scope = app.Services.CreateScope())
+    if (persistenceProvider != "mongodb")
     {
+        // Auto-migrate database on startup
+        using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<JobServiceSagaDbContext>();
         await db.Database.EnsureCreatedAsync();
         Log.Information("Database initialized (SQLite)");
@@ -188,11 +226,22 @@ try
     // GET /api/reports/{jobId}/data - Get raw job data from JobSaga table
     app.MapGet("/api/reports/{jobId:guid}/data", async (
         Guid jobId,
-        JobServiceSagaDbContext dbContext) =>
+        IConfiguration configuration,
+        IServiceProvider serviceProvider) =>
     {
-        var jobSaga = await dbContext.Set<JobSaga>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(j => j.CorrelationId == jobId);
+        JobSaga? jobSaga;
+        if (configuration.GetValue<string>("PersistenceProvider") == "mongodb")
+        {
+            IMongoCollection<JobSaga> jobSagas = serviceProvider.GetRequiredService<IMongoCollection<JobSaga>>();
+            var asyncCursor = jobSagas.FindAsync(j => j.CorrelationId == jobId);
+            jobSaga = await asyncCursor.Result.FirstOrDefaultAsync();
+        }
+        else
+        {
+            JobServiceSagaDbContext dbContext = serviceProvider.GetRequiredService<JobServiceSagaDbContext>();
+            jobSaga = await EntityFrameworkQueryableExtensions
+                .FirstOrDefaultAsync(dbContext.Set<JobSaga>().AsNoTracking(), j => j.CorrelationId == jobId);
+        }
 
         if (jobSaga is null)
         {
