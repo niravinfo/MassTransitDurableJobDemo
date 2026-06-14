@@ -178,6 +178,82 @@ try
     .Produces<ReportStatusResponse>()
     .Produces(404);
 
+    // POST /api/reports/bulk - Submit multiple report generation jobs
+    app.MapPost("/api/reports/bulk", async (
+        BulkSubmitReportRequest request,
+        IPublishEndpoint publishEndpoint) =>
+    {
+        var reportTypes = new[] { "Sales", "Inventory", "Financial", "Marketing", "HR", "Operations", "Customer", "Product", "Supply Chain", "Compliance" };
+        var reportNames = new[] { "Q1 Summary", "Monthly Overview", "Trends Analysis", "Performance Review", "Budget Report", "Audit Report", "Forecast", "Compliance Check", "Regional Breakdown", "Year-End Wrap", "Profit Analysis", "Cost Report" };
+        var requestedByUsers = new[] { "alice", "bob", "charlie", "diana", "eve", "frank" };
+        var random = new Random();
+
+        var response = new BulkSubmitReportResponse
+        {
+            TotalSubmitted = request.Count,
+            SubmittedAt = DateTime.UtcNow
+        };
+
+        for (int i = 0; i < request.Count; i++)
+        {
+            var reportId = Guid.NewGuid();
+            var dateFrom = DateTime.UtcNow.AddDays(-random.Next(7, 180));
+            var message = new GenerateReport
+            {
+                ReportId = reportId,
+                ReportName = reportNames[random.Next(reportNames.Length)],
+                ReportType = reportTypes[random.Next(reportTypes.Length)],
+                DateFrom = dateFrom,
+                DateTo = dateFrom.AddDays(random.Next(7, 90)),
+                RequestedBy = requestedByUsers[random.Next(requestedByUsers.Length)]
+            };
+
+            var jobId = await publishEndpoint.SubmitJob<GenerateReport>(message, CancellationToken.None);
+
+            response.Jobs.Add(new BulkJobResult
+            {
+                JobId = jobId,
+                ReportId = reportId,
+                ReportName = message.ReportName,
+                ReportType = message.ReportType
+            });
+        }
+
+        Log.Information("Bulk report jobs submitted: Count={Count}", request.Count);
+
+        return Results.Ok(response);
+    })
+    .WithName("BulkSubmitReports")
+    .Produces<BulkSubmitReportResponse>();
+
+    // DELETE /api/reports/{jobId} - Cancel a job
+    app.MapDelete("/api/reports/{jobId:guid}", async (
+        Guid jobId,
+        IPublishEndpoint publishEndpoint) =>
+    {
+        await publishEndpoint.CancelJob(jobId, "User Request");
+
+        Log.Information("Job cancelled: JobId={JobId}", jobId);
+
+        return Results.Ok(new { Message = "Job cancellation requested", JobId = jobId });
+    })
+    .WithName("CancelJob")
+    .Produces(200);
+
+    // POST /api/reports/{jobId}/retry - Retry a job
+    app.MapPost("/api/reports/{jobId:guid}/retry", async (
+        Guid jobId,
+        IPublishEndpoint publishEndpoint) =>
+    {
+        await publishEndpoint.RetryJob(jobId);
+
+        Log.Information("Job retry requested: JobId={JobId}", jobId);
+
+        return Results.Ok(new { Message = "Job retry requested", JobId = jobId });
+    })
+    .WithName("RetryJob")
+    .Produces(200);
+
     // GET /api/reports - List available endpoints (health check)
     app.MapGet("/api/reports", () =>
     {
@@ -187,7 +263,10 @@ try
             Endpoints = new[]
             {
                 "POST /api/reports - Submit a report generation job",
-                "GET /api/reports/{jobId} - Get job status by Job ID"
+                "POST /api/reports/bulk - Submit multiple report generation jobs",
+                "GET /api/reports/{jobId} - Get job status by Job ID",
+                "DELETE /api/reports/{jobId} - Cancel a job by Job ID",
+                "POST /api/reports/{jobId}/retry - Retry a job by Job ID"
             }
         });
     })

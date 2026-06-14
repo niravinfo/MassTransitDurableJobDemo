@@ -61,6 +61,38 @@ public record SubmitReportResponse
 }
 
 /// <summary>
+/// Request model for bulk submitting report generation jobs.
+/// </summary>
+public record BulkSubmitReportRequest
+{
+    /// <summary>
+    /// Number of jobs to submit.
+    /// </summary>
+    public int Count { get; init; }
+}
+
+/// <summary>
+/// Response model returned when bulk report jobs are submitted.
+/// </summary>
+public record BulkSubmitReportResponse
+{
+    public int TotalSubmitted { get; init; }
+    public DateTime SubmittedAt { get; init; }
+    public List<BulkJobResult> Jobs { get; init; } = new();
+}
+
+/// <summary>
+/// Individual job result within a bulk submit response.
+/// </summary>
+public record BulkJobResult
+{
+    public Guid JobId { get; init; }
+    public Guid ReportId { get; init; }
+    public string ReportName { get; init; } = default!;
+    public string ReportType { get; init; } = default!;
+}
+
+/// <summary>
 /// Response model for job status queries.
 /// </summary>
 public record ReportStatusResponse
@@ -79,4 +111,20 @@ public record ReportStatusResponse
     public string? FaultReason { get; init; }
     public bool IsFaulted { get; init; }
     public bool IsCompleted { get; init; }
+}
+
+/// <summary>
+/// Response model containing the raw job data from the JobSaga table.
+/// </summary>
+public record GetJobDataResponse
+{
+    public Guid JobId { get; init; }
+    public Dictionary<string, object> Job { get; init; } = new();
+    public Dictionary<string, object>? JobState { get; init; }
+    public DateTime? Submitted { get; init; }
+    public DateTime? Started { get; init; }
+    public DateTime? Completed { get; init; }
+    public DateTime? Faulted { get; init; }
+    public string? Reason { get; init; }
+    public int RetryAttempt { get; init; }
 }
