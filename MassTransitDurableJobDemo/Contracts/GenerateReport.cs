@@ -68,7 +68,6 @@ public record ReportStatusResponse
     public Guid JobId { get; init; }
     public Guid ReportId { get; init; }
     public string ReportName { get; init; } = default!;
-    public string ReportType { get; init; } = default!;
     public string CurrentState { get; init; } = default!;
     public long ProgressValue { get; init; }
     public long ProgressLimit { get; init; }

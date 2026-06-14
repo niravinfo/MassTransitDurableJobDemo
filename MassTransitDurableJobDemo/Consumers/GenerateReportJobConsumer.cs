@@ -29,7 +29,11 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
         // Check if there is previously saved state (from a retry after cancellation)
         var state = context.TryGetJobState(out ReportJobState? existingState)
             ? existingState!
-            : new ReportJobState();
+            : new ReportJobState()
+            {
+                ReportId = msg.ReportId,
+                ReportName = msg.ReportName
+            };
 
         var startStage = state.CurrentStage;
 

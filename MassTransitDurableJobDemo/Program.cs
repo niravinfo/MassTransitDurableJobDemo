@@ -145,14 +145,13 @@ try
     {
         try
         {
-            var jobState = await requestClient.GetJobState(jobId);
+            var jobState = await requestClient.GetJobState<ReportJobState>(jobId);
 
             return Results.Ok(new ReportStatusResponse
             {
                 JobId = jobState.JobId,
-                ReportId = jobId,
-                ReportName = "",
-                ReportType = "",
+                ReportId = jobState.JobState?.ReportId ?? Guid.Empty,
+                ReportName = jobState.JobState?.ReportName ?? "",
                 CurrentState = jobState.CurrentState ?? "Unknown",
                 ProgressValue = jobState.ProgressValue ?? 0,
                 ProgressLimit = jobState.ProgressLimit ?? 100,

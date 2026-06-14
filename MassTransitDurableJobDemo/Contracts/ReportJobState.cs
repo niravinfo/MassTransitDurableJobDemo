@@ -6,6 +6,9 @@ namespace MassTransitDurableJobDemo.Contracts;
 /// </summary>
 public record ReportJobState
 {
+    public Guid ReportId { get; init; } = Guid.Empty;
+    public string ReportName { get; init; } = "";
+
     /// <summary>
     /// Which stage the job reached before being interrupted (0 = not started).
     /// </summary>
