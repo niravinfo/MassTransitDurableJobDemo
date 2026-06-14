@@ -121,6 +121,8 @@ public record GetJobDataResponse
     public Guid JobId { get; init; }
     public Dictionary<string, object> Job { get; init; } = new();
     public Dictionary<string, object>? JobState { get; init; }
+    public long? ProgressLimit { get; init; }
+    public double? ProgressPercentage { get; init; }
     public DateTime? Submitted { get; init; }
     public DateTime? Started { get; init; }
     public DateTime? Completed { get; init; }

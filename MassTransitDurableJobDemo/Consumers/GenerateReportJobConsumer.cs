@@ -64,6 +64,9 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 await context.SaveJobState(state);
             }
 
+            // Simulate idle time between stages
+            await SimulateWork(context.CancellationToken, Random.Shared.Next(5_000, 10_000));
+
             // Stage 2: Aggregate (10% -> 40%)
             if (startStage < 2)
             {
@@ -74,7 +77,7 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 for (int i = 1; i <= 3; i++)
                 {
                     context.CancellationToken.ThrowIfCancellationRequested();
-                    await SimulateWork(context.CancellationToken, 2000);
+                    await SimulateWork(context.CancellationToken, Random.Shared.Next(2_500, 5_000));
 
                     // Progress within stage 2: maps to overall progress ~10-40%
                     long progress = 10 + i * 10; // 20, 30, 40
@@ -93,6 +96,9 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 await context.SaveJobState(state);
             }
 
+            // Simulate idle time between stages
+            await SimulateWork(context.CancellationToken, Random.Shared.Next(5_000, 10_000));
+
             // Stage 3: Generate Excel (40% -> 70%)
             if (startStage < 3)
             {
@@ -103,7 +109,7 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 for (int sheet = 1; sheet <= 3; sheet++)
                 {
                     context.CancellationToken.ThrowIfCancellationRequested();
-                    await SimulateWork(context.CancellationToken, 1200);
+                    await SimulateWork(context.CancellationToken, Random.Shared.Next(2_500, 5_000));
 
                     // Progress within stage 3: maps to overall progress ~40-70%
                     long progress = 40 + sheet * 10; // 50, 60, 70
@@ -120,13 +126,16 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 await context.SaveJobState(state);
             }
 
+            // Simulate idle time between stages
+            await SimulateWork(context.CancellationToken, Random.Shared.Next(5_000, 10_000));
+
             // Stage 4: Upload File (70% -> 90%)
             if (startStage < 4)
             {
                 state = state with { CurrentStage = 4, StageDescription = "Uploading file" };
                 _logger.LogInformation("[Job {JobId}] Stage 4/5: Uploading file...", context.JobId);
 
-                await SimulateWork(context.CancellationToken, 2000);
+                await SimulateWork(context.CancellationToken, Random.Shared.Next(2_500, 5_000));
 
                 var destination = $"https://storage.example.com/reports/{msg.ReportId:N}";
                 state = state with { UploadDestination = destination };
@@ -135,6 +144,9 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 await context.SetJobProgress(90, 100);
                 await context.SaveJobState(state);
             }
+
+            // Simulate idle time between stages
+            await SimulateWork(context.CancellationToken, Random.Shared.Next(5_000, 10_000));
 
             // Stage 5: Complete (90% -> 100%)
             if (startStage < 5)
@@ -146,7 +158,7 @@ public class GenerateReportJobConsumer : IJobConsumer<GenerateReport>
                 };
                 _logger.LogInformation("[Job {JobId}] Stage 5/5: Finalizing...", context.JobId);
 
-                await SimulateWork(context.CancellationToken, 500);
+                await SimulateWork(context.CancellationToken, Random.Shared.Next(2_500, 5_000));
                 await context.SetJobProgress(100, 100);
 
                 _logger.LogInformation(

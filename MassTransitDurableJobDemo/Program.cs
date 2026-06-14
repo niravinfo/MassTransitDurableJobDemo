@@ -48,8 +48,13 @@ try
         x.AddConsumer<GenerateReportJobConsumer>(cfg =>
         {
             cfg.Options<JobOptions<GenerateReport>>(options =>
+            {
                 options.SetJobTimeout(TimeSpan.FromMinutes(30))
-                       .SetConcurrentJobLimit(5));
+                       .SetConcurrentJobLimit(5);
+
+                // Progress Buffer
+                options.ProgressBuffer.TimeLimit = TimeSpan.FromSeconds(3);
+            });
         });
 
         // Job Service saga state machines with EF Core + SQLite
@@ -79,6 +84,8 @@ try
             cfg.UseDelayedMessageScheduler();
             cfg.ConfigureEndpoints(context);
         });
+
+        x.DisableUsageTelemetry();
     });
 
     builder.Services.AddOptions<MassTransitHostOptions>()
@@ -178,6 +185,41 @@ try
     .Produces<ReportStatusResponse>()
     .Produces(404);
 
+    // GET /api/reports/{jobId}/data - Get raw job data from JobSaga table
+    app.MapGet("/api/reports/{jobId:guid}/data", async (
+        Guid jobId,
+        JobServiceSagaDbContext dbContext) =>
+    {
+        var jobSaga = await dbContext.Set<JobSaga>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(j => j.CorrelationId == jobId);
+
+        if (jobSaga is null)
+        {
+            return Results.NotFound(new { Error = "Job not found" });
+        }
+
+        return Results.Ok(new GetJobDataResponse
+        {
+            JobId = jobSaga.CorrelationId,
+            Job = jobSaga.Job,
+            JobState = jobSaga.JobState,
+            ProgressLimit = jobSaga.LastProgressLimit,
+            ProgressPercentage = jobSaga.LastProgressLimit.HasValue && jobSaga.LastProgressLimit.Value > 0
+                ? (double)(jobSaga.LastProgressValue ?? 0) / jobSaga.LastProgressLimit.Value * 100
+                : null,
+            Submitted = jobSaga.Submitted,
+            Started = jobSaga.Started,
+            Completed = jobSaga.Completed,
+            Faulted = jobSaga.Faulted,
+            Reason = jobSaga.Reason,
+            RetryAttempt = jobSaga.RetryAttempt
+        });
+    })
+    .WithName("GetJobData")
+    .Produces<GetJobDataResponse>()
+    .Produces(404);
+
     // POST /api/reports/bulk - Submit multiple report generation jobs
     app.MapPost("/api/reports/bulk", async (
         BulkSubmitReportRequest request,
@@ -265,6 +307,7 @@ try
                 "POST /api/reports - Submit a report generation job",
                 "POST /api/reports/bulk - Submit multiple report generation jobs",
                 "GET /api/reports/{jobId} - Get job status by Job ID",
+                "GET /api/reports/{jobId}/data - Get raw job data from JobSaga table",
                 "DELETE /api/reports/{jobId} - Cancel a job by Job ID",
                 "POST /api/reports/{jobId}/retry - Retry a job by Job ID"
             }
