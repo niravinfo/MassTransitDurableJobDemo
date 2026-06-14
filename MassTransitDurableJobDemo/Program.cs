@@ -1,5 +1,6 @@
 using MassTransit;
 using MassTransit.Contracts.JobService;
+using MassTransit.EntityFrameworkCoreIntegration;
 using MassTransitDurableJobDemo.Consumers;
 using MassTransitDurableJobDemo.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,7 @@ using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Scalar.AspNetCore;
 using Serilog;
+using System.Reflection;
 
 var configuration = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
@@ -31,20 +33,30 @@ try
     // Serilog integration
     builder.Host.UseSerilog();
 
-    // EF Core / SQLite
-    //builder.Services.AddDbContext<JobServiceSagaDbContext>(options =>
-    //{
-    //    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"), m =>
-    //    {
-    //        m.MigrationsAssembly(Assembly.GetExecutingAssembly().GetName().Name);
-    //        m.MigrationsHistoryTable($"__{nameof(JobServiceSagaDbContext)}");
-    //    });
-    //});
+    string persistenceProvider = builder.Configuration["PersistenceProvider"] ?? "sqlite";
+
+    if (persistenceProvider == "mongodb")
+    {
+        BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
+    }
+    else
+    {
+        // EF Core / SQLite
+        builder.Services.AddDbContext<JobServiceSagaDbContext>(options =>
+        {
+            options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"), m =>
+            {
+                m.MigrationsAssembly(Assembly.GetExecutingAssembly().GetName().Name);
+                m.MigrationsHistoryTable($"__{nameof(JobServiceSagaDbContext)}");
+            });
+        });
+    }
+
+
 
     // OpenAPI
     builder.Services.AddOpenApi();
 
-    BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
 
     // MassTransit
     builder.Services.AddMassTransit(x =>
@@ -62,24 +74,39 @@ try
             });
         });
 
-        // Job Service saga state machines with EF Core + SQLite
-        x.AddJobSagaStateMachines(options =>
+        if (persistenceProvider == "mongodb")
         {
-            options.ConcurrentMessageLimit = 2;
-            options.FinalizeCompleted = false;
-            options.SuspectJobRetryCount = 3;
-            options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
-        })
-        .MongoDbRepository(r =>
+            // Job Service saga state machines with MongoDB
+            x.AddJobSagaStateMachines(options =>
+            {
+                options.ConcurrentMessageLimit = 2;
+                options.FinalizeCompleted = false;
+                options.SuspectJobRetryCount = 3;
+                options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
+            })
+            .MongoDbRepository(r =>
+            {
+                r.Connection = builder.Configuration.GetConnectionString("MongoDb");
+                r.DatabaseName = "MassTransitDemo";
+            });
+        }
+        else
         {
-            r.Connection = builder.Configuration.GetConnectionString("MongoDb");
-            r.DatabaseName = "MassTransitDemo";
-        });
-        //.EntityFrameworkRepository(r =>
-        //{
-        //    r.ExistingDbContext<JobServiceSagaDbContext>();
-        //    r.UseSqlite();
-        //});
+            // Job Service saga state machines with EF Core + SQLite
+            x.AddJobSagaStateMachines(options =>
+            {
+                options.ConcurrentMessageLimit = 2;
+                options.FinalizeCompleted = false;
+                options.SuspectJobRetryCount = 3;
+                options.SuspectJobRetryDelay = TimeSpan.FromSeconds(10);
+            })
+            .EntityFrameworkRepository(r =>
+            {
+                r.ExistingDbContext<JobServiceSagaDbContext>();
+                r.UseSqlite();
+            });
+        }
+
 
         x.SetKebabCaseEndpointNameFormatter();
 
@@ -112,48 +139,49 @@ try
     app.MapOpenApi();
     app.MapScalarApiReference();
 
-    // Auto-migrate database on startup
-    //using (var scope = app.Services.CreateScope())
-    //{
-    //    var db = scope.ServiceProvider.GetRequiredService<JobServiceSagaDbContext>();
-    //    await db.Database.EnsureCreatedAsync();
-    //    Log.Information("Database initialized (SQLite)");
-    //}
+    if (persistenceProvider != "mongodb")
+    {
+        // Auto-migrate database on startup
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<JobServiceSagaDbContext>();
+        await db.Database.EnsureCreatedAsync();
+        Log.Information("Database initialized (SQLite)");
+    }
 
     // API Endpoints
 
     // POST /api/reports - Submit a report generation job
     app.MapPost("/api/reports", async (
-        SubmitReportRequest request,
-        IPublishEndpoint publishEndpoint) =>
+    SubmitReportRequest request,
+    IPublishEndpoint publishEndpoint) =>
+{
+    var reportId = Guid.NewGuid();
+
+    var message = new GenerateReport
     {
-        var reportId = Guid.NewGuid();
+        ReportId = reportId,
+        ReportName = request.ReportName,
+        ReportType = request.ReportType,
+        DateFrom = request.DateFrom ?? DateTime.UtcNow.AddDays(-30),
+        DateTo = request.DateTo ?? DateTime.UtcNow,
+        RequestedBy = request.RequestedBy
+    };
 
-        var message = new GenerateReport
-        {
-            ReportId = reportId,
-            ReportName = request.ReportName,
-            ReportType = request.ReportType,
-            DateFrom = request.DateFrom ?? DateTime.UtcNow.AddDays(-30),
-            DateTo = request.DateTo ?? DateTime.UtcNow,
-            RequestedBy = request.RequestedBy
-        };
+    var jobId = await publishEndpoint.SubmitJob<GenerateReport>(message, CancellationToken.None);
 
-        var jobId = await publishEndpoint.SubmitJob<GenerateReport>(message, CancellationToken.None);
+    Log.Information("Report job submitted: JobId={JobId}, ReportId={ReportId}, Name={Name}",
+        jobId, reportId, request.ReportName);
 
-        Log.Information("Report job submitted: JobId={JobId}, ReportId={ReportId}, Name={Name}",
-            jobId, reportId, request.ReportName);
-
-        return Results.Ok(new SubmitReportResponse
-        {
-            JobId = jobId,
-            ReportId = reportId,
-            Message = "Report generation job submitted successfully",
-            SubmittedAt = DateTime.UtcNow
-        });
-    })
-    .WithName("SubmitReport")
-    .Produces<SubmitReportResponse>();
+    return Results.Ok(new SubmitReportResponse
+    {
+        JobId = jobId,
+        ReportId = reportId,
+        Message = "Report generation job submitted successfully",
+        SubmittedAt = DateTime.UtcNow
+    });
+})
+.WithName("SubmitReport")
+.Produces<SubmitReportResponse>();
 
     // GET /api/reports/{jobId} - Get job status
     app.MapGet("/api/reports/{jobId:guid}", async (
@@ -196,47 +224,24 @@ try
     .Produces(404);
 
     // GET /api/reports/{jobId}/data - Get raw job data from JobSaga table
-    //app.MapGet("/api/reports/{jobId:guid}/data", async (
-    //    Guid jobId,
-    //    JobServiceSagaDbContext dbContext) =>
-    //{
-    //    var jobSaga = await dbContext.Set<JobSaga>()
-    //        .AsNoTracking()
-    //        .FirstOrDefaultAsync(j => j.CorrelationId == jobId);
-
-    //    if (jobSaga is null)
-    //    {
-    //        return Results.NotFound(new { Error = "Job not found" });
-    //    }
-
-    //    return Results.Ok(new GetJobDataResponse
-    //    {
-    //        JobId = jobSaga.CorrelationId,
-    //        Job = jobSaga.Job,
-    //        JobState = jobSaga.JobState,
-    //        ProgressLimit = jobSaga.LastProgressLimit,
-    //        ProgressPercentage = jobSaga.LastProgressLimit.HasValue && jobSaga.LastProgressLimit.Value > 0
-    //            ? (double)(jobSaga.LastProgressValue ?? 0) / jobSaga.LastProgressLimit.Value * 100
-    //            : null,
-    //        Submitted = jobSaga.Submitted,
-    //        Started = jobSaga.Started,
-    //        Completed = jobSaga.Completed,
-    //        Faulted = jobSaga.Faulted,
-    //        Reason = jobSaga.Reason,
-    //        RetryAttempt = jobSaga.RetryAttempt
-    //    });
-    //})
-    //.WithName("GetJobData")
-    //.Produces<GetJobDataResponse>()
-    //.Produces(404);
-
-    // GET /api/reports/{jobId}/data - Get raw job data from JobSaga table
     app.MapGet("/api/reports/{jobId:guid}/data", async (
         Guid jobId,
-        IMongoCollection<JobSaga> jobSagas) =>
+        IConfiguration configuration,
+        IServiceProvider serviceProvider) =>
     {
-        var asyncCursor = jobSagas.FindAsync(j => j.CorrelationId == jobId);
-        var jobSaga = await asyncCursor.Result.FirstOrDefaultAsync();
+        JobSaga? jobSaga;
+        if (configuration.GetValue<string>("PersistenceProvider") == "mongodb")
+        {
+            IMongoCollection<JobSaga> jobSagas = serviceProvider.GetRequiredService<IMongoCollection<JobSaga>>();
+            var asyncCursor = jobSagas.FindAsync(j => j.CorrelationId == jobId);
+            jobSaga = await asyncCursor.Result.FirstOrDefaultAsync();
+        }
+        else
+        {
+            JobServiceSagaDbContext dbContext = serviceProvider.GetRequiredService<JobServiceSagaDbContext>();
+            jobSaga = await EntityFrameworkQueryableExtensions
+                .FirstOrDefaultAsync(dbContext.Set<JobSaga>().AsNoTracking(), j => j.CorrelationId == jobId);
+        }
 
         if (jobSaga is null)
         {
