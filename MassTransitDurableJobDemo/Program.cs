@@ -152,36 +152,36 @@ try
 
     // POST /api/reports - Submit a report generation job
     app.MapPost("/api/reports", async (
-    SubmitReportRequest request,
-    IPublishEndpoint publishEndpoint) =>
-{
-    var reportId = Guid.NewGuid();
-
-    var message = new GenerateReport
+        SubmitReportRequest request,
+        IPublishEndpoint publishEndpoint) =>
     {
-        ReportId = reportId,
-        ReportName = request.ReportName,
-        ReportType = request.ReportType,
-        DateFrom = request.DateFrom ?? DateTime.UtcNow.AddDays(-30),
-        DateTo = request.DateTo ?? DateTime.UtcNow,
-        RequestedBy = request.RequestedBy
-    };
+        var reportId = Guid.NewGuid();
 
-    var jobId = await publishEndpoint.SubmitJob<GenerateReport>(message, CancellationToken.None);
+        var message = new GenerateReport
+        {
+            ReportId = reportId,
+            ReportName = request.ReportName,
+            ReportType = request.ReportType,
+            DateFrom = request.DateFrom ?? DateTime.UtcNow.AddDays(-30),
+            DateTo = request.DateTo ?? DateTime.UtcNow,
+            RequestedBy = request.RequestedBy
+        };
 
-    Log.Information("Report job submitted: JobId={JobId}, ReportId={ReportId}, Name={Name}",
-        jobId, reportId, request.ReportName);
+        var jobId = await publishEndpoint.SubmitJob<GenerateReport>(message, CancellationToken.None);
 
-    return Results.Ok(new SubmitReportResponse
-    {
-        JobId = jobId,
-        ReportId = reportId,
-        Message = "Report generation job submitted successfully",
-        SubmittedAt = DateTime.UtcNow
-    });
-})
-.WithName("SubmitReport")
-.Produces<SubmitReportResponse>();
+        Log.Information("Report job submitted: JobId={JobId}, ReportId={ReportId}, Name={Name}",
+            jobId, reportId, request.ReportName);
+
+        return Results.Ok(new SubmitReportResponse
+        {
+            JobId = jobId,
+            ReportId = reportId,
+            Message = "Report generation job submitted successfully",
+            SubmittedAt = DateTime.UtcNow
+        });
+    })
+    .WithName("SubmitReport")
+    .Produces<SubmitReportResponse>();
 
     // GET /api/reports/{jobId} - Get job status
     app.MapGet("/api/reports/{jobId:guid}", async (
