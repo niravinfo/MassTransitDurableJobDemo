@@ -1,0 +1,68 @@
+info:
+  name: SubmitReport
+  type: http
+  seq: 1
+  tags:
+    - MassTransitDurableJobDemo
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/reports"
+  body:
+    type: json
+    data: |-
+      {
+        "reportName": "Q1 Summary",
+        "reportType": "Sales",
+        "dateFrom": "2026-01-01T00:00:00.000Z",
+        "dateTo": "2026-04-01T00:00:00.000Z",
+        "requestedBy": "Nirav Patel"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        let responseBody = res.getBody();
+        let jobId = responseBody.jobId;
+        console.log(jobId);
+        bru.setVar("JobId", jobId);
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 Response
+    description: OK
+    request:
+      url: "{{baseUrl}}/api/reports"
+      method: POST
+      body:
+        type: json
+        data: |-
+          {
+            "reportName": "",
+            "reportType": "",
+            "dateFrom": "",
+            "dateTo": "",
+            "requestedBy": ""
+          }
+    response:
+      status: 200
+      statusText: OK
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+            "jobId": "",
+            "reportId": "",
+            "message": "",
+            "submittedAt": ""
+          }

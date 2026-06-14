@@ -1,0 +1,28 @@
+opencollection: 1.0.0
+
+info:
+  name: MassTransitDurableJobDemo | v1
+config:
+  proxy:
+    inherit: true
+    config:
+      protocol: http
+      hostname: ""
+      port: ""
+      auth:
+        username: ""
+        password: ""
+      bypassProxy: ""
+
+request:
+  variables:
+    - name: baseUrl
+      value: https://localhost:5066
+    - name: JobId
+      value: d8340000-11a1-98d4-daf7-08dec9cb2979
+bundled: false
+extensions:
+  bruno:
+    ignore:
+      - node_modules
+      - .git
