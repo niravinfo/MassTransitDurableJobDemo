@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "https": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "scalar",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": true,
+      "applicationUrl": "https://localhost:5066;http://localhost:5067"
+    }
+  },
+  "$schema": "https://json.schemastore.org/launchsettings.json"
+}
